@@ -19,20 +19,20 @@
 ; kibana curls to elastic on browser tools, jsconsole, network, then issue a search, check kibana section.
 ; "curl -XGET http://localhost:9200/logstash-2013.05.23/_search?pretty -d ' 
 ; {"size": 100, 
-;   "query": {
-;     "filtered": 
-;       {"query": 
-;         {"query_string": 
-;           {"default_operator": "OR", default_field": "@message",
-;            "query": "@message:Stats AND @type:finder_core_application"}},
-;             "filter": 
-;               {"range": 
-;                 {"@timestamp": 
-;                   {"from": "2013-05-22T16:10:48Z", "to": "2013-05-23T02:10:48Z"}}}}},
+;  "query": {
+;     "filtered":{
+;       "query":{ 
+;         "query_string":{
+;           "default_operator": "OR", default_field": "@message",
+;           "query": "@message:Stats AND @type:finder_core_application"}}, <- close of query
+;       "filter": {
+;         "range": {
+;           "@timestamp": {
+;             "from": "2013-05-22T16:10:48Z", "to": "2013-05-23T02:10:48Z"}}}}},
 ;   "from": 0,
-;   "sort": 
-;     {"@timestamp":
-;       {"order": "desc"}},
+;   "sort": {
+;     "@timestamp":{
+;       "order": "desc"}},
 
 (def ^:dynamic *es-conn*)
 
@@ -59,11 +59,12 @@
 
 ;
 ; forward declaration
-(declare process-stats-hits)
-(declare process-stats-record)
+(declare text-query)
 (declare stats-query)
 (declare format-stats)
 (declare trigger-task-query)
+(declare process-stats-hits)
+(declare process-stats-record)
 
 (defn test-query [idxname query processor]
   (connect "cte-db3" 9200)
@@ -81,7 +82,12 @@
   (test-query idxname (stats-query) process-stats-hits))
 
 (defn test-trigger-query [idxname]
-  (test-query idxname (trigger-task-query) prn))
+  ;(test-query idxname (trigger-task-query) prn))
+  (test-query idxname (text-query) prn))
+
+(defn text-query []
+  (q/text "text" "elapsed"))
+
 
 (defn stats-query []
   ; logstash column begin with @
@@ -90,11 +96,13 @@
       :default_field "@message"
       :query "@message:Stats AND @type:finder_core_application")))
 
+
 (defn trigger-task-query []
   (q/filtered :query
     (q/query-string
       :default_field "@message"
       :query "@message:elapsed AND @type:finder_core_accounting_triggeredTask")))
+
 
 ; hits contains log message
 (defn process-stats-hits [hits]
