@@ -5,7 +5,7 @@
            [java.util Map Map$Entry List ArrayList Collection Iterator HashMap])
   (:require [clj-redis.client :as redis]) ; bring in redis namespace
   (:require [logquery.elastic.es :as es])
-  (:require [clj-time.core :refer :all])  ; :refer :all the same as :use, blow all pub vars into ns
+  (:require [clj-time.core :refer :all :exclude [extend]])  ; :refer :all the same as :use, blow all pub vars into ns
   (:require [clj-time.format])
   (:gen-class :main true))    ; bring in redis namespace
 
@@ -20,7 +20,8 @@
         nxt-week (plus now (weeks 1))
         idxname (or args nowidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
-    (es/test-query idxname)))
+    (es/test-trigger-query idxname)
+    (es/test-stats-query idxname)))
 
 ; the main 
 (defn -main [& args]

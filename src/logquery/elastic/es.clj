@@ -4,14 +4,14 @@
   (:require [clojure.java.jdbc :as sql])
   (:import [java.io FileReader]
            [java.util Map Map$Entry List ArrayList Collection Iterator HashMap])
-  (:require [clj-redis.client :as redis])     ; bring in redis namespace
+  (:require [clj-redis.client :as redis])    ; bring in redis namespace
   (:require [clojure.data.json :as json])
   (:require [clojurewerkz.elastisch.rest          :as esr]
             [clojurewerkz.elastisch.rest.document :as esd]
             [clojurewerkz.elastisch.query         :as q]
             [clojurewerkz.elastisch.rest.response :as esrsp]
             [clojure.pprint :as pp])
-  (:require [clj-time.core :refer :all]))
+  (:require [clj-time.core :refer :all :exclude [extend]]))
 
 ;
 ; http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
@@ -59,22 +59,29 @@
 
 ;
 ; forward declaration
-(declare process-hits)
-(declare process-record)
+(declare process-stats-hits)
+(declare process-stats-record)
 (declare stats-query)
 (declare format-stats)
+(declare trigger-task-query)
 
-(defn test-query [idxname ]
+(defn test-query [idxname query processor]
   (connect "cte-db3" 9200)
   (let [res (esd/search-all-types idxname ;"logstash-2013.05.22"
-              :query (stats-query)
+              :query query
               :sort {"@timestamp" {"order" "desc"}})
          n (esrsp/total-hits res)
          hits (esrsp/hits-from res)
          f (esrsp/facets-from res)]
     (println (format "Total hits: %d" n))
-    (process-hits hits)))
+    (processor hits)))
     
+
+(defn test-stats-query [idxname]
+  (test-query idxname (stats-query) process-stats-hits))
+
+(defn test-trigger-query [idxname]
+  (test-query idxname (trigger-task-query) prn))
 
 (defn stats-query []
   ; logstash column begin with @
@@ -83,15 +90,20 @@
       :default_field "@message"
       :query "@message:Stats AND @type:finder_core_application")))
 
+(defn trigger-task-query []
+  (q/filtered :query
+    (q/query-string
+      :default_field "@message"
+      :query "@message:elapsed AND @type:finder_core_accounting_triggeredTask")))
+
 ; hits contains log message
-(defn process-hits [hits]
-  (let [top (first hits)
-        msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
-        stats (map process-record msgs)] ; for each msg record, extract timestamp and stats field
+(defn process-stats-hits [hits]
+  (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
+        stats (map process-stats-record msgs)] ; for each msg record, extract timestamp and stats field
     (map format-stats stats)))    ; map format stat fn to each stats in each record
 
 
-(defn process-record [record]
+(defn process-stats-record [record]
   ; for each log record, ret the first and 5th fields (timestamp and stats)
   (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
     ;(prn fields (count fields))
