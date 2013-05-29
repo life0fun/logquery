@@ -11,8 +11,8 @@
             [clojurewerkz.elastisch.query         :as q]
             [clojurewerkz.elastisch.rest.response :as esrsp]
             [clojure.pprint :as pp])
-  (:require [clj-time.core :refer :all :exclude [extend]]))
-
+  (:require [clj-time.core :refer :all :exclude [extend]])
+  (:require [clj-time.format :refer :all]))
 ;
 ; http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
 ; curl -XGET 'http://cte-db3:9200/logstash-2013.05.22/_search?q=@type=finder_core_api
@@ -33,6 +33,10 @@
 ;   "sort": {
 ;     "@timestamp":{
 ;       "order": "desc"}},
+
+; For elasticsearch time range query. You can use DateTimeFormatterBuilder, or
+; always use (formatters :data-time) formatter.
+;
 
 (def ^:dynamic *es-conn*)
 
@@ -67,8 +71,12 @@
 (declare process-stats-record)
 
 (defn test-query [idxname query processor]
+  ; if idxname is unknown, we can use search-all-indexes-and-types.
+  ; query range to be 
   (connect "cte-db3" 9200)
-  (let [res (esd/search-all-types idxname ;"logstash-2013.05.22"
+              ;esd/search-all-types idxname ;"logstash-2013.05.22"
+  (let [res (esd/search-all-indexes-and-types 
+              :size 100
               :query query
               :sort {"@timestamp" {"order" "desc"}})
          n (esrsp/total-hits res)
@@ -90,14 +98,23 @@
 
 
 (defn stats-query []
-  ; logstash column begin with @
-  (q/filtered :query 
-    (q/query-string 
-      :default_field "@message"
-      :query "@message:Stats AND @type:finder_core_application")))
+  ; form query params for Stats query. time range from yesterday to today.
+  ; logstash column/field begin with @
+  (let [now (now) pre (minus now (days 1))
+        nowfmt (unparse (formatters :date-time) now)
+        prefmt (unparse (formatters :date-time) pre)]
+    (q/filtered
+      :query 
+        (q/query-string 
+          :default_field "@message"
+          :query "@message:Stats AND @type:finder_core_application")
+      :filter 
+        {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
+                               :to nowfmt }}})))
 
 
 (defn trigger-task-query []
+  ; form query params to search elapsed keyword in log message.
   (q/filtered :query
     (q/query-string
       :default_field "@message"
@@ -106,6 +123,7 @@
 
 ; hits contains log message
 (defn process-stats-hits [hits]
+  ; query result contains hits map, extract log message from hits map
   (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
         stats (map process-stats-record msgs)] ; for each msg record, extract timestamp and stats field
     (map format-stats stats)))    ; map format stat fn to each stats in each record
@@ -117,7 +135,8 @@
     ;(prn fields (count fields))
     (map #(nth fields %) [1 5])))
 
-(defn format-stats [stats] ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")
+(defn format-stats [stats] 
+  ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")
   ; convert key=val to kv map using regexp. first, capture inside {}, match key=val.
   (let [st (first (re-find #"\{(.*?)\}" (last stats)))  ; capture non-greedy everything inside {}
         kv (re-seq #"([^=}{]+)=([^=}{]+)(?:,|$|}|\s+)" st) ; capture (any except ={) = () as kv pair seq
