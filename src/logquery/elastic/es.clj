@@ -11,8 +11,11 @@
             [clojurewerkz.elastisch.query         :as q]
             [clojurewerkz.elastisch.rest.response :as esrsp]
             [clojure.pprint :as pp])
-  (:require [clj-time.core :refer :all :exclude [extend]])
-  (:require [clj-time.format :refer :all]))
+  (:require [clj-time.core :as clj-time :exclude [extend]]
+            [clj-time.format])
+  (:require [incanter.core :refer :all]
+            [incanter.stats :refer :all]
+            [incanter.charts :refer :all]))
 ;
 ; http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
 ; curl -XGET 'http://cte-db3:9200/logstash-2013.05.22/_search?q=@type=finder_core_api
@@ -69,13 +72,14 @@
 (declare trigger-task-query)
 (declare process-stats-hits)
 (declare process-stats-record)
+(declare view-data-example)
 
-(defn test-query [idxname query processor]
+(defn test-query [idxname query process-fn]
   ; if idxname is unknown, we can use search-all-indexes-and-types.
   ; query range to be 
-  (connect "cte-db3" 9200)
-              ;esd/search-all-types idxname ;"logstash-2013.05.22"
-  (let [res (esd/search-all-indexes-and-types 
+  ;(connect "cte-db3" 9200)
+  (connect "localhost" 9200)           
+  (let [res (esd/search-all-indexes-and-types ;esd/search-all-types idxname ;"logstash-2013.05.22"
               :size 100
               :query query
               :sort {"@timestamp" {"order" "desc"}})
@@ -83,15 +87,17 @@
          hits (esrsp/hits-from res)
          f (esrsp/facets-from res)]
     (println (format "Total hits: %d" n))
-    (processor hits)))
+    (process-fn hits)))
     
 
 (defn test-stats-query [idxname]
   (test-query idxname (stats-query) process-stats-hits))
 
+
 (defn test-trigger-query [idxname]
   ;(test-query idxname (trigger-task-query) prn))
   (test-query idxname (text-query) prn))
+
 
 (defn text-query []
   (q/text "text" "elapsed"))
@@ -100,9 +106,9 @@
 (defn stats-query []
   ; form query params for Stats query. time range from yesterday to today.
   ; logstash column/field begin with @
-  (let [now (now) pre (minus now (days 1))
-        nowfmt (unparse (formatters :date-time) now)
-        prefmt (unparse (formatters :date-time) pre)]
+  (let [now (clj-time/now) pre (clj-time/minus now (clj-time/days 1))
+        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
+        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
     (q/filtered
       :query 
         (q/query-string 
@@ -126,7 +132,8 @@
   ; query result contains hits map, extract log message from hits map
   (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
         stats (map process-stats-record msgs)] ; for each msg record, extract timestamp and stats field
-    (map format-stats stats)))    ; map format stat fn to each stats in each record
+    (map format-stats stats))
+    (view-data-example))    ; map format stat fn to each stats in each record
 
 
 (defn process-stats-record [record]
@@ -145,3 +152,31 @@
         elapsed (quot (read-string (re-find #"\d+" (get statmap "timeTaken"))) 64000)] ; 64 threads
     (prn "elapse time: " elapsed "successEvents:" (get statmap "successfulEventCount") 
          (first stats))))
+
+(defn view-data-example []
+  ; to draw multiple bins bar-chart, like x with year(08, 09) and y with 4 seasons.
+  ; for categories seq, manually repeate years [08 09] for 4 times, [08(spr), 09(spr), 08(sum), 09(sum), ...]
+  ; for values seq, manully give value for [08-spr, 09-spr, 08-sum, 09-sum, ...]
+  ; for grp by, we have 4 seasons in each year, so repeat 2 times [spr, sum, fall, wint]
+  (let [ds (to-dataset [{"test" 1, "elapse" 20, "records" 300}
+                        {"test" 2, "elapse" 30, "records" 200}
+                        {"test" 3, "elapse" 10, "records" 100}])]
+
+    (with-data ds  ; set $data to ds
+      ;(view $data) 
+      (let [t ($ :test $data)     ; get test column
+            e ($ :elapse $data)
+            r ($ :records $data)
+            tests (mapcat identity (repeat 2 t))   ; test[1 2 3], each test, show 2 results, elapse, records
+            ;vals (mapcat vector e r)    ; map take 1st of e, r, apply vector, concat with 2nd of e, r
+            vals (concat e r)  ;elapse of test [1 2 3] followed by records
+            grp (apply mapcat vector (repeat 3 [:elapse :records]))  ; 3 tests, on grp, repeat type
+           ]
+        (prn "test: " t "elapse: " e "records: " r "tests: " tests " vals: " vals)
+        (view (bar-chart tests vals ;:test-time :elapse-time
+                       :group-by grp
+                       :title "Trigger task runs"
+                       :x-label "test"
+                       :y-label "elapse and records"
+                       :legend true))))))
+ 
