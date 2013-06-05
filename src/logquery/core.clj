@@ -12,6 +12,7 @@
 
 ; search
 (defn logsearch [args]
+  (case )
   (let [now (clj-time.local/local-now)
         fns (map (fn [nm] (ns-resolve 'clj-time.core (symbol nm))) ["year" "month" "day"])
         datm (map (fn [f] (format "%02d" (f now))) fns)
@@ -25,6 +26,8 @@
 
 ; the main 
 (defn -main [& args]
- 	(prn " >>>> elastic searching logs <<<<< ")
+ 	(prn " >>>> elastic log query <<<<< ")
+  (prn " - lein run stats idx-name ")
+  (prn " - lein run plot hs-data-file")
 	(logsearch args))
 
