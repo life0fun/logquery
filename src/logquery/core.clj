@@ -24,7 +24,7 @@
         idxname (or args nowidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
     (es/test-trigger-query idxname)
-    (es/test-stats-query idxname)))
+    (es/query-stats idxname)))
 
 
 (defn plot-data [args]

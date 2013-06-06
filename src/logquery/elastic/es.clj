@@ -48,10 +48,11 @@
 (def time-range 1)    ; from now, how far back
 
 ; forward declaration
-(declare text-query)
-(declare stats-query)
+(declare text-query-filter)
+(declare elastic-query)
+(declare stats-query-string)
 (declare format-stats)
-(declare trigger-task-query)
+(declare trigger-task-filter)
 (declare process-stats-hits)
 (declare process-stats-record)
 
@@ -79,8 +80,25 @@
       (println (format "Total hits: %d" n))
       (pp/pprint hits))))
 
+(defn test-trigger-query [idxname]
+  ;(test-query idxname (trigger-task-filter) prn))
+  (elastic-query idxname (text-query-filter) prn))
 
-(defn test-query [idxname query process-fn]
+
+(defn trigger-task-filter []
+  ; form query params to search elapsed keyword in log message.
+  (q/filtered :query
+    (q/query-string
+      :default_field "@message"
+      :query "@message:elapsed AND @type:finder_core_accounting_triggeredTask")))
+
+
+(defn text-query-filter []
+  ; filter to query text field with elapsed keyword
+  (q/text "text" "elapsed"))
+
+
+(defn elastic-query [idxname query process-fn]
   ; if idxname is unknown, we can use search-all-indexes-and-types.
   ; query range to be 
   (connect "cte-db3" 9200)
@@ -96,20 +114,11 @@
     (process-fn hits)))
 
 
-(defn test-stats-query [idxname]
-  (test-query idxname (stats-query) process-stats-hits))
+(defn query-stats [idxname]
+  (elastic-query idxname (stats-query-string) process-stats-hits))
 
 
-(defn test-trigger-query [idxname]
-  ;(test-query idxname (trigger-task-query) prn))
-  (test-query idxname (text-query) prn))
-
-
-(defn text-query []
-  (q/text "text" "elapsed"))
-
-
-(defn stats-query []
+(defn stats-query-string []
   ; form query params for Stats query. time range from yesterday to today.
   ; logstash column/field begin with @
   (let [now (clj-time/now) 
@@ -120,18 +129,10 @@
       :query 
         (q/query-string 
           :default_field "@message"
-          :query "@message:Stats AND @type:finder_core_application")
+          :query "@message:CNIContactUsageEventHandlerStats AND @type:finder_core_application")
       :filter 
         {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
                                :to nowfmt }}})))
-
-
-(defn trigger-task-query []
-  ; form query params to search elapsed keyword in log message.
-  (q/filtered :query
-    (q/query-string
-      :default_field "@message"
-      :query "@message:elapsed AND @type:finder_core_accounting_triggeredTask")))
 
 
 ; hits contains log message
@@ -140,7 +141,9 @@
   (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
         stats (map process-stats-record msgs)
         test-result (map format-stats stats)] ; for each msg record, extract timestamp and stats field
-    (view-stats-data test-result)))    ; map format stat fn to each stats in each record
+    ;(prn test-result)))    ; testing
+    (view-stats-data test-result)))  ;map format stat fn to each stats in each record
+                
 
 
 (defn process-stats-record [record]
@@ -151,6 +154,7 @@
 
 (defn format-stats [stats] 
   ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")
+  ;(prn stats))
   ; convert key=val to kv map using regexp. first, capture inside {}, match key=val.
   (let [ts (clojure.string/join " " (reverse (map #(first (clojure.string/split % #"\.")) (take 3 (rest (clojure.string/split (clojure.string/trim (first stats)) #"\s+"))))))
         ;tsf (clj-time.format/unparse (clj-time.format/formatters :date-hour-minute-second) (clj-time.format/parse-local ts))

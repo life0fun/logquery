@@ -60,7 +60,8 @@
                          :y-label "times, historystore records(k), events"
                          :legend true)]
           (view chart)
-          (save chart "/opt/haijin/svn/wm/project/vci_scale/test/x.png" :width 1200 :height 900))))))
+          (save chart "/opt/haijin/svn/wm/project/vci_scale/test/data/contactusagehs.png"
+                      :width 1200 :height 900))))))
 
 
 (defn plot-hs-data
