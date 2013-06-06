@@ -1,7 +1,7 @@
 # Elastic Logquery
 
-Query logs in ElasticSearch store.
-Use elastic RESTful APIs to process log stream.
+Query logs in ElasticSearch store using elastic RESTful APIs.
+Process log and perform statistic computing and ploting the data using R-like Incanter library.
 
 ## Installation
 
@@ -11,7 +11,7 @@ lein run
 
 ## Usage
 
-lein run 2013.05.23
+lein run stats index-name
 
 ## Options
 
@@ -20,7 +20,8 @@ Configurations for elasticstore host and port.
 ## ElasticSearch Store API
 
 First, get familar with elastic search API.
-	 http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
+	 
+	http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
 
 You can find out what query string been sent to elasticsearch by looking into Kibana network section.
 
@@ -42,5 +43,11 @@ kibana curls to elastic on browser tools, jsconsole, network, then issue a searc
 	;   "sort": {
 	;     "@timestamp":{
 	;       "order": "desc"}},
-### Bugs
+
+
+## Incanter
+
+We using Incanter for basic statistic computing and ploting data.
+
+
 
