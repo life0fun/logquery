@@ -23,7 +23,7 @@
         nxt-week (clj-time/plus now (clj-time/weeks 1))
         idxname (or args nowidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
-    (es/test-trigger-query idxname)
+    ;(es/test-trigger-query idxname)
     (es/query-stats idxname)))
 
 
