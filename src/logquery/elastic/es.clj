@@ -45,7 +45,7 @@
 ; globals
 (def ^:dynamic *es-conn*)
 
-(def time-range 1)    ; from now, how far back
+(def time-range 1)    ; from now, just 1 day back
 
 ; forward declaration
 (declare text-query-filter)
@@ -55,6 +55,11 @@
 (declare trigger-task-filter)
 (declare process-stats-hits)
 (declare process-stats-record)
+
+(declare email-query-string)
+(declare format-email)
+(declare process-email-hits)
+(declare process-email-record)
 
 
 ; wrap connecting fn
@@ -79,6 +84,7 @@
           hits (esrsp/hits-from res)]
       (println (format "Total hits: %d" n))
       (pp/pprint hits))))
+
 
 (defn test-trigger-query [idxname]
   ;(test-query idxname (trigger-task-filter) prn))
@@ -143,7 +149,6 @@
         test-result (map format-stats stats)] ; for each msg record, extract timestamp and stats field
     ;(prn test-result)))    ; testing
     (view-stats-data test-result)))  ;map format stat fn to each stats in each record
-                
 
 
 (defn process-stats-record [record]
@@ -151,6 +156,7 @@
   (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
     ;(prn fields (count fields))
     (map #(nth fields %) [1 5])))
+
 
 (defn format-stats [stats] 
   ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")
@@ -166,4 +172,58 @@
     (prn "elapse time: " elapsed "successEvents:" (get statmap "successfulEventCount") (rest stats))
     (println)
     (assoc statmap :elapse elapsed :timestamp ts)))  ; ret the map
-    
+  
+
+;; section for handling email query
+(defn query-email [idxname]
+  (elastic-query idxname (email-query-string) process-email-hits))
+
+
+(defn email-query-string []
+  ; form query params for Stats query. time range from yesterday to today.
+  ; logstash column/field begin with @
+  (let [now (clj-time/now) 
+        pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
+        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
+        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
+    (q/filtered
+      :query 
+        (q/query-string 
+          :default_field "@message"
+          :query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
+      :filter 
+        {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
+                               :to nowfmt }}})))
+
+
+; hits contains log message
+(defn process-email-hits [hits]
+  ; query result contains hits map, extract log message from hits map
+  (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
+        emailstats (map process-email-record msgs)
+        test-result (map format-email emailstats)] ; for each msg record, extract timestamp and stats field
+    ;(prn (first test-result))))
+    (view-email-data test-result)))  ;map format stat fn to each stats in each record
+                
+
+(defn process-email-record [record]
+  ; for each log record, ret the first and 5th fields (timestamp and stats)
+  (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
+    ;(prn fields (count fields))
+    (map #(nth fields %) [1 5])))
+
+
+(defn format-email [stats] 
+  ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")
+  ;(prn stats))
+  ; convert key=val to kv map using regexp. first, capture inside {}, match key=val.
+  (let [ts (clojure.string/join " " (reverse (map #(first (clojure.string/split % #"\.")) (take 3 (rest (clojure.string/split (clojure.string/trim (first stats)) #"\s+"))))))
+        ;tsf (clj-time.format/unparse (clj-time.format/formatters :date-hour-minute-second) (clj-time.format/parse-local ts))
+        st (first (re-find #"\{(.*?)\}" (last stats)))  ; capture non-greedy everything inside {}
+        kv (re-seq #"([^=}{]+)=([^=}{]+)(?:,|$|}|\s+)" st) ; capture (any except ={) = () as kv pair seq
+        ; after reg capture, each entry has 3 ele, [k=v, k, v], extract k v
+        statmap (zipmap (map #(% 1) kv) (map #(-> % (nth 2) (->> (re-find #"\d+"))) kv))
+        elapsed (quot (read-string (re-find #"\d+" (get statmap "totalTimeTaken"))) 64000)]    ; 64 threads
+    (prn "elapse time: " elapsed "numberOfEmailsSent:" (get statmap "numberOfEmailsSent") statmap)
+    (println)
+    (assoc statmap :elapse elapsed :timestamp ts)))  ; ret the map

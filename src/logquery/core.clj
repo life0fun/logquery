@@ -13,8 +13,8 @@
 
 
 ; status query
-(defn stats-query [args]
-  (prn "stats-query args :" args)
+(defn log-query [test args]
+  (prn "log-query args :" test args)
   (let [now (clj-time.local/local-now)
         fns (map (fn [nm] (ns-resolve 'clj-time.core (symbol nm))) ["year" "month" "day"])
         datm (map (fn [f] (format "%02d" (f now))) fns)   ; clojure.core/format string
@@ -24,20 +24,26 @@
         idxname (or args nowidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
     ;(es/test-trigger-query idxname)
-    (es/query-stats idxname)))
+    (case test
+      :stats (es/query-stats idxname)
+      :email (es/query-email idxname)
+      (es/query-stats idxname))))     ; default query stats
 
 
-(defn plot-data [args]
-  ; args ary is ["plot" "/tmp/x"]
-  (plot/plot-hs-data (second args)))  ; second arg is log file
+(defn plot-data 
+  ([]
+    (plot/plot-hs-data "/opt/haijin/svn/wm/project/vci_scale/test/data/hs"))
+  ([args]
+    ; args ary is ["plot" "/tmp/x"]
+    (plot/plot-hs-data args)))  ; second arg is log file
 
 
-; the main 
 (defn -main [& args]
  	(prn " >>>> elastic log query <<<<< ")
   (prn " - lein run stats index-name ")
   (prn " - lein run plot hs-data-file")
   (case (first args)
-    "stats" (stats-query args)
-    "plot"  (plot-data args)
-    (stats-query args)))    ; default
+    "stats" (log-query :stats args)
+    "email" (log-query :email args)
+    "plot"  (plot-data)
+    (log-query :stats args)))    ; default
