@@ -48,18 +48,18 @@
 (def time-range 1)    ; from now, just 1 day back
 
 ; forward declaration
+(declare query-string-keyword)
+(declare process-record)
 (declare text-query-filter)
 (declare elastic-query)
-(declare stats-query-string)
-(declare format-stats)
-(declare trigger-task-filter)
-(declare process-stats-hits)
-(declare process-stats-record)
 
-(declare email-query-string)
-(declare format-email)
+(declare query-stats)
+(declare process-stats-hits)
+(declare format-stats)
+
+(declare query-email)
 (declare process-email-hits)
-(declare process-email-record)
+(declare format-email)
 
 
 ; wrap connecting fn
@@ -120,42 +120,47 @@
     (process-fn hits)))
 
 
-(defn query-stats [idxname]
-  (elastic-query idxname (stats-query-string) process-stats-hits))
-
-
-(defn stats-query-string []
+(defn query-string-keyword [keyword]
   ; form query params for Stats query. time range from yesterday to today.
   ; logstash column/field begin with @
   (let [now (clj-time/now) 
-        pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
+        ;pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
+        pre (clj-time/minus now (clj-time/hours 3))  ; from now back 1 days
         nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
         prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
     (q/filtered
       :query 
         (q/query-string 
           :default_field "@message"
-          :query "@message:CNIContactUsageEventHandlerStats AND @type:finder_core_application")
+          ;:query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
+          :query (str "@message:" keyword " AND @type:finder_core_application"))
       :filter 
         {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
                                :to nowfmt }}})))
+
+
+(defn process-record [record]
+  ; logstash log has the following format, [type | timestamp | file-name | log-content ]
+  ; for each log record, ret the first and 5th fields (timestamp and stats)
+  (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
+    ;(prn fields (count fields))
+    (map #(nth fields %) [1 5])))
+
+
+(defn query-stats [idxname]
+  (elastic-query idxname 
+                 (query-string-keyword "CNIContactUsageEventHandlerStats") 
+                 process-stats-hits))
 
 
 ; hits contains log message
 (defn process-stats-hits [hits]
   ; query result contains hits map, extract log message from hits map
   (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
-        stats (map process-stats-record msgs)
+        stats (map process-record msgs)
         test-result (map format-stats stats)] ; for each msg record, extract timestamp and stats field
     ;(prn test-result)))    ; testing
     (view-stats-data test-result)))  ;map format stat fn to each stats in each record
-
-
-(defn process-stats-record [record]
-  ; for each log record, ret the first and 5th fields (timestamp and stats)
-  (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
-    ;(prn fields (count fields))
-    (map #(nth fields %) [1 5])))
 
 
 (defn format-stats [stats] 
@@ -176,42 +181,20 @@
 
 ;; section for handling email query
 (defn query-email [idxname]
-  (elastic-query idxname (email-query-string) process-email-hits))
-
-
-(defn email-query-string []
-  ; form query params for Stats query. time range from yesterday to today.
-  ; logstash column/field begin with @
-  (let [now (clj-time/now) 
-        pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
-        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
-        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
-    (q/filtered
-      :query 
-        (q/query-string 
-          :default_field "@message"
-          :query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
-      :filter 
-        {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
-                               :to nowfmt }}})))
+  (elastic-query idxname 
+                 (query-string-keyword "EmailAlertDigestEventHandlerStats")
+                 process-email-hits))
 
 
 ; hits contains log message
 (defn process-email-hits [hits]
   ; query result contains hits map, extract log message from hits map
   (let [msgs (map (fn [row] (-> row :_source (get (keyword "@message")))) hits)
-        emailstats (map process-email-record msgs)
+        emailstats (map process-record msgs)
         test-result (map format-email emailstats)] ; for each msg record, extract timestamp and stats field
     ;(prn (first test-result))))
     (view-email-data test-result)))  ;map format stat fn to each stats in each record
                 
-
-(defn process-email-record [record]
-  ; for each log record, ret the first and 5th fields (timestamp and stats)
-  (let [fields (clojure.string/split record #"\|")]  ; log delimiter is |
-    ;(prn fields (count fields))
-    (map #(nth fields %) [1 5])))
-
 
 (defn format-email [stats] 
   ; stats is ("Fri May 24.." "Stats = CNI{hs=10, time=20}")

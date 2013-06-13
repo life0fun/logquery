@@ -56,7 +56,7 @@
               
               chart (bar-chart tests vals ;:test-time :elapse-time
                          :group-by grp
-                         :title "Contact Usage runs"
+                         :title "Contact Usage HS Tests"
                          :x-label "test"
                          :y-label "times, historystore records(k), events"
                          :legend true)]
@@ -103,7 +103,7 @@
               
               chart (bar-chart tests vals ;:test-time :elapse-time
                          :group-by grp
-                         :title "Dialy Email digest runs"
+                         :title "Dialy Email Digest Tests"
                          :x-label "test"
                          :y-label "times, emails, email-time, historystore record and query(k)"
                          :legend true)
