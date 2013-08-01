@@ -1,8 +1,8 @@
-;;
-;; query elastic search engine
-;;
+;
+; query with facet aggregations to perform statistics
+;
 
-(ns logquery.elastic.es
+(ns logquery.elastic.facet
   (:require [clojure.string :as str])
   (:require [clojure.java.jdbc :as sql])
   (:import [java.io FileReader]
@@ -62,28 +62,82 @@
 (declare format-email)
 
 
+(def elasticserver "cte-db3")
+(def elasticport 9200)
+
 ; wrap connecting fn
 (defn connect [host port]
   (esr/connect! (str "http://" host ":" port)))
 
 
-; eval exprs within a new connection.    
+; @Deprecated! this one does not work.
 (defmacro with-esconn [[host port] & exprs]
   `(with-open [conn# (esr/connect! (str "http://" ~host ":" ~port))]
      (binding [*es-conn* conn#]                
        (do ~@exprs))))
 
 
-; document query takes index name, mapping name and query (as a Clojure map)
-; curl -s http://127.0.0.1:9200/_status?pretty=true | grep logstash
-; curl -XGET 'http://cte-db3:9200/logstash-2013.05.22/_search?q=@type=finder_core_api
-(defn test-query-with [tag]
-  (with-esconn ["cte-db3" 9200]
-    (let [res (esd/search "logstash-2013.05.22" :query (q/term :message "timeInvoked"))
-          n    (esrsp/total-hits res)
-          hits (esrsp/hits-from res)]
-      (println (format "Total hits: %d" n))
-      (pp/pprint hits))))
+(defn query-string-keyword [keyword]
+  "format query params with time range from yesterday to today.
+   logstash column/field begin with @, eg :@type, :@message, :@tag "
+  (let [now (clj-time/now) 
+        ;pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
+        pre (clj-time/minus now (clj-time/hours 20))  ; from now back 1 days
+        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
+        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
+    ; use filtered query
+    (q/filtered
+      :query
+        (q/query-string 
+          :default_field "@message"
+          ;:query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
+          :query (str "@message:" keyword))
+      :filter 
+        {:range {"@timestamp" {:from prefmt   ;"2013-05-29T00:44:42"
+                               :to nowfmt }}})))
+
+
+; ret a map that specifies date histogram query
+(defn date-hist-facet [name keyfield valfield interval]
+  "form a date histogram facets map, like {name : {date_histogram : {field: f}}}"
+  (let [qmap (hash-map "field" keyfield "interval" interval)]
+    (if (nil? valfield)
+      (hash-map name (hash-map "date_histogram" qmap))
+      (hash-map name (hash-map "date_histogram" (assoc qmap "value_field" valfield))))))
+
+
+; output :facets {:facet-name {:_type "terms" :terms [{:term "vci" :count 12} {:term "finder" :count 45}] }}
+(defn term-facet [name keyfield]
+  "form a term facets map, like {name : {terms : {field: f}}}"
+  (let [tmap (hash-map "terms" (hash-map "field" keyfield))]
+    (hash-map name tmap)))
+
+
+(defn elastic-query [idxname keyword process-fn]
+  ; if idxname is unknown, we can use search-all-indexes-and-types.
+  ; query range to be 
+  ;(with-esconn [elasticserver elasticport]
+  (connect elasticserver elasticport)
+  (let [qrystr (query-string-keyword keyword)
+        res (esd/search-all-types idxname ;esd/search-all-types idxname ;"logstash-2013.05.22"
+              :size 2
+              :query qrystr
+              ;:facets (term-facet "logtags" "@tags")
+              :facets (date-hist-facet "chart0" "@timestamp" nil "10m")
+              :sort {"@timestamp" {"order" "desc"}})
+        n (esrsp/total-hits res)
+        hits (esrsp/hits-from res)
+        fres (esrsp/facets-from res)]
+    (println (format "Total hits: %d" n))
+    (process-fn fres)
+    (process-fn hits))
+    res)   ; ret response
+
+
+(defn test-date-hist [idxname]
+  (prn "test-date-hist : " idxname)
+  (elastic-query idxname "consumer" pp/pprint))
+
 
 
 (defn test-trigger-query [idxname]
@@ -102,41 +156,6 @@
 (defn text-query-filter []
   ; filter to query text field with elapsed keyword
   (q/text "text" "elapsed"))
-
-
-(defn elastic-query [idxname query process-fn]
-  ; if idxname is unknown, we can use search-all-indexes-and-types.
-  ; query range to be 
-  (connect "cte-db3" 9200)
-  ;(connect "localhost" 9200)           
-  (let [res (esd/search-all-indexes-and-types ;esd/search-all-types idxname ;"logstash-2013.05.22"
-              :size 100
-              :query query
-              :sort {"@timestamp" {"order" "desc"}})
-         n (esrsp/total-hits res)
-         hits (esrsp/hits-from res)
-         f (esrsp/facets-from res)]
-    (println (format "Total hits: %d" n))
-    (process-fn hits)))
-
-
-(defn query-string-keyword [keyword]
-  ; form query params for Stats query. time range from yesterday to today.
-  ; logstash column/field begin with @
-  (let [now (clj-time/now) 
-        ;pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
-        pre (clj-time/minus now (clj-time/hours 20))  ; from now back 1 days
-        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
-        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
-    (q/filtered
-      :query 
-        (q/query-string 
-          :default_field "@message"
-          ;:query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
-          :query (str "@message:" keyword " AND @type:finder_core_application"))
-      :filter 
-        {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
-                               :to nowfmt }}})))
 
 
 (defn process-record [record]

@@ -4,7 +4,8 @@
   (:import [java.io FileReader]
            [java.util Map Map$Entry List ArrayList Collection Iterator HashMap])
   (:require [clj-redis.client :as redis]) ; bring in redis namespace
-  (:require [logquery.elastic.es :as es])
+  (:require [logquery.elastic.es :as es]
+            [logquery.elastic.facet :as facet])
   (:require [logquery.incanter.plot :as plot])
   (:require [clj-time.core :as clj-time :exclude [extend]]
             [clj-time.format]
@@ -21,12 +22,13 @@
         nowidx (str "logstash-" (clojure.string/join "." datm))
         fmt-now (clj-time.format/unparse (clj-time.format/formatter "yyyy.MM.dd") now)
         nxt-week (clj-time/plus now (clj-time/weeks 1))
-        idxname (or args nowidx)]
+        idxname (or (nil? args) nowidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
     ;(es/test-trigger-query idxname)
     (case test
       :stats (es/query-stats idxname)
       :email (es/query-email idxname)
+      :facet (facet/test-date-hist idxname)
       (es/query-stats idxname))))     ; default query stats
 
 
@@ -46,4 +48,5 @@
     "stats" (log-query :stats args)
     "email" (log-query :email args)
     "plot"  (plot-data)
+    "facet" (log-query :facet (rest args))
     (log-query :stats args)))    ; default

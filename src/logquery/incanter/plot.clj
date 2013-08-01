@@ -103,7 +103,7 @@
               
               chart (bar-chart tests vals ;:test-time :elapse-time
                          :group-by grp
-                         :title "Dialy Email Digest Tests"
+                         :title "Daily Email Digest Tests"
                          :x-label "test"
                          :y-label "times, emails, email-time, historystore record and query(k)"
                          :legend true)
