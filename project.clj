@@ -1,8 +1,6 @@
 (defproject logquery "0.1.0-SNAPSHOT"
-  :description "query cte-db3 elastic store for log processing"
-  :url "[http://cte-db3:5601/  http://cte-db3:5555]"
-  :license {:name "Location Labs"
-            :url "http://locationlabs.com"}
+  :description "query elastic store for log processing"
+  :url "[http://localhost:5601/  http://localhost:5555]"
   :dependencies [
   	[org.clojure/clojure "1.4.0"]
   	[org.clojure/clojure-contrib "1.2.0"] ; do I stil need the contrib ?
