@@ -14,21 +14,25 @@
 
 
 ; status query
-(defn log-query [test args]
-  (prn "log-query args :" test args)
+(defn log-query [qtype args]
+  (prn "log-query args :" qtype args)
   (let [now (clj-time.local/local-now)
         fns (map (fn [nm] (ns-resolve 'clj-time.core (symbol nm))) ["year" "month" "day"])
         datm (map (fn [f] (format "%02d" (f now))) fns)   ; clojure.core/format string
         nowidx (str "logstash-" (clojure.string/join "." datm))
         fmt-now (clj-time.format/unparse (clj-time.format/formatter "yyyy.MM.dd") now)
         nxt-week (clj-time/plus now (clj-time/weeks 1))
-        idxname (or (nil? args) nowidx)]
+        qword (first args)
+        qidx (second args)
+        idxname (if (nil? qidx) nowidx qidx)]
 	  (prn "searching..." idxname fmt-now nowidx nxt-week)
     ;(es/test-trigger-query idxname)
-    (case test
+    (case qtype
       :stats (es/query-stats idxname)
       :email (es/query-email idxname)
       :facet (facet/test-date-hist idxname)
+      ; query all columns of finder log by keyword
+      :query (es/query-finderlog idxname qword) 
       (es/query-stats idxname))))     ; default query stats
 
 
@@ -42,11 +46,12 @@
 
 (defn -main [& args]
  	(prn " >>>> elastic log query <<<<< ")
-  (prn " - lein run stats index-name ")
+  (prn " - lein run stats logstash-2013.08.26")
   (prn " - lein run plot hs-data-file")
   (case (first args)
     "stats" (log-query :stats args)
     "email" (log-query :email args)
     "plot"  (plot-data)
     "facet" (log-query :facet (rest args))
+    "query" (log-query :query (rest args))   ; general query for finder api
     (log-query :stats args)))    ; default

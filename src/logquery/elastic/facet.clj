@@ -130,8 +130,8 @@
         fres (esrsp/facets-from res)]
     (println (format "Total hits: %d" n))
     (process-fn fres)
-    (process-fn hits))
-    res)   ; ret response
+    (process-fn hits)
+    res))   ; ret response
 
 
 (defn test-date-hist [idxname]

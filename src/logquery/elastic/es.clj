@@ -1,7 +1,6 @@
 ;;
 ;; query elastic search engine
 ;;
-
 (ns logquery.elastic.es
   (:require [clojure.string :as str])
   (:require [clojure.java.jdbc :as sql])
@@ -24,7 +23,7 @@
 ; "curl -XGET http://localhost:9200/logstash-2013.05.23/_search?pretty -d ' 
 ; {"size": 100, 
 ;  "query": {
-;     "filtered":{
+;     "filtered":{  <= a json obj contains a query and a filter, apply filter to the query result
 ;       "query":{ 
 ;         "query_string":{
 ;           "default_operator": "OR", default_field": "@message",
@@ -41,6 +40,61 @@
 ; For elasticsearch time range query. You can use DateTimeFormatterBuilder, or
 ; always use (formatters :data-time) formatter.
 ;
+
+; query string to search one one column
+; fields to project @tags and @message columns into result json "fields" object.
+; {   
+;     "fields": ["@tags", "@message"]  <= a list of doc fields should ret
+;     ,"query": {
+;         "query_string": {
+;            "default_field": "@tags", 
+;            "query": "kiln"
+;         }
+;     }
+; }
+; 
+
+; query string to search for multiple columns, set use_dis_max to true.
+; http://www.elasticsearch.org/guide/reference/query-dsl/query-string-query/
+; {   
+;     "fields": ["@tags", "@type", "@message"]
+;     ,"query": {
+;         "query_string": {
+;            "fields": ["@tags", "@type", "column-name.*"], <= for * match, same name fields must have same type.
+;            "query": "kiln OR finder_core_api",
+;            "use_dis_max": true  <= convert query into a DisMax query
+;         }
+;     }
+; }
+
+; elasticsearch engine document format
+; every doc in ES has [] _id, _index, _type, _score, _source.]
+; the _source column is where all custom mapping columns are defined. for logstash,
+; @source, @tags, @type, @message, @timestamp, @timestamp, ...
+
+; each index(db) has a list of mappings types(tables) that maps doc fields and their core types.
+; each mapping has a name and :properties column family, where all columns and col :type and attrs.
+; mapping-type {"person" {:properties {:username {:type "string" :store "yes"} :age {}}}}
+;               "vip"    {:properties {:vipname {:type "multi_field" :store "yes"} :age {}}}
+; column :type "multi_field" allows a list of core_types to apply to the same column during mapping.
+;"properties" : {
+;   "name" : {
+;     "type" : "multi_field",
+;     "path": "just_name",  // how multi-field is accessed, apart from the default field
+;     "fields" : {
+;         "name" : {"type" : "string", "index" : "analyzed"},
+;         "untouched" : {"type" : "string", "index" : "not_analyzed"}}
+
+
+; logstash grok filter apply to logs with tag [] and append new fields, so in mapping type
+; finder-core-application, {"properties" {"@fields" {"properties" {class, host, level, thread}}}}
+; grok { 
+;   tags => ["format_finder_core_application"]
+;   pattern => "^%{FORMAT_FINDER_CORE_APPLICATION}"
+;   patterns_dir => "/etc/logstash/patterns"
+; }
+; FORMAT_FINDER_CORE_APPLICATION (?m)%{HOSTNAME:host} \| %{_FINDER_TS:ts} \| %{DATA:thread} \| %{JAVACLASS:class} \| %{LOGLEVEL:level} \|
+
 
 ; globals
 (def ^:dynamic *es-conn*)
@@ -61,6 +115,9 @@
 (declare process-email-hits)
 (declare format-email)
 
+
+; our key logstash fields, not that the result column is keyword. ":@message"
+(def logstash-fields ["@type" "@tags" "@message" "@source_host" "@source"])
 
 ; wrap connecting fn
 (defn connect [host port]
@@ -109,23 +166,24 @@
   ; query range to be 
   (connect "cte-db3" 9200)
   ;(connect "localhost" 9200)           
-  (let [res (esd/search-all-indexes-and-types ;esd/search-all-types idxname ;"logstash-2013.05.22"
-              :size 100
+  (let [res ;(esd/search-all-indexes-and-types  ; cant do this, we now have 6billion logs
+            (esd/search-all-types idxname ;"logstash-2013.05.22"
+              :size 10        ; limits to 10 results
               :query query
-              :sort {"@timestamp" {"order" "desc"}})
+              :sort {"@timestamp" {"order" "desc"}})  ; desc order
          n (esrsp/total-hits res)
-         hits (esrsp/hits-from res)
-         f (esrsp/facets-from res)]
+         hits (esrsp/hits-from res)  ; searched out docs in hits array
+         facets (esrsp/facets-from res)]  ; facets
     (println (format "Total hits: %d" n))
     (process-fn hits)))
 
 
-(defn query-string-keyword [keyword]
+(defn query-string-keyword [keyname]
   ; form query params for Stats query. time range from yesterday to today.
   ; logstash column/field begin with @
   (let [now (clj-time/now) 
         ;pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
-        pre (clj-time/minus now (clj-time/hours 20))  ; from now back 1 days
+        pre (clj-time/minus now (clj-time/days 7))  ; from now back 1 days
         nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
         prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
     (q/filtered
@@ -133,11 +191,32 @@
         (q/query-string 
           :default_field "@message"
           ;:query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
-          :query (str "@message:" keyword " AND @type:finder_core_application"))
+          :query (str "@message:" keyname " AND @type:finder_core_application"))
       :filter 
         {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
                                :to nowfmt }}})))
 
+(defn multifields-query [keyname]
+  "query term in multi fields, @type, @tags, @message, @source_host, @source
+  logstash field begins with @ symbol"
+  (let [now (clj-time/now) 
+        ;pre (clj-time/minus now (clj-time/days time-range))  ; from now back 2 days
+        pre (clj-time/minus now (clj-time/hours 20))  ; from now back 1 days
+        nowfmt (clj-time.format/unparse (clj-time.format/formatters :date-time) now)
+        prefmt (clj-time.format/unparse (clj-time.format/formatters :date-time) pre)]
+    ; (q/filtered
+    ;   :query 
+    ;     (q/query-string
+    ;       :fields logstash-fields
+    ;       ;:query "@message:EmailAlertDigestEventHandlerStats AND @type:finder_core_application")
+    ;       :query (str keyname))
+    ;   :filter 
+    ;     {:range {"@timestamp" {:from prefmt     ;"2013-05-29T00:44:42"
+    ;                            :to nowfmt }}})))
+    (q/query-string
+      :fields logstash-fields
+      :query (str keyname))))
+      
 
 (defn process-record [record]
   ; logstash log has the following format, [type | timestamp | file-name | log-content ]
@@ -210,3 +289,22 @@
     (prn "elapse time: " elapsed "numberOfEmailsSent:" (get statmap "numberOfEmailsSent") statmap)
     (println)
     (assoc statmap :elapse elapsed :timestamp ts)))  ; ret the map
+
+
+; hits = :_source {:@source "file://finderapi", :@tags ["finder" "verizon" "core" "FROM_TCP"]
+(defn process-finderlog-hits [hits]
+  "searched out docs is in the hits ary, iterate the list"
+  (letfn [(get-value [sdoc]
+            (-> sdoc
+              :_source    ; select source map out
+              ;((juxt (get "@message") (get "@type") (get "@tags")))))] ; project needed fields
+              (get (keyword "@message"))))] ; project needed fields
+    (let [values (map get-value hits)]
+      ;(doall (map prn hits))
+      (doall (map prn values)))))
+
+(defn query-finderlog [idxname term]
+  "query logstash with key name in all columns, eg, 
+   @type, @tags, @message, @source_host, @source columns"
+  (let [query (multifields-query term)]
+    (elastic-query idxname query process-finderlog-hits)))
