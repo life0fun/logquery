@@ -16,6 +16,26 @@
   (:require [clj-time.core :as clj-time :exclude [extend]]
             [clj-time.format])
   (:require [logquery.incanter.plot :refer :all]))
+
+; overall query object format
+; {
+;     size: # number of results to return (defaults to 10)
+;     from: # offset into results (defaults to 0)
+;     fields: # list of document fields that should be returned - http://elasticsearch.org/guide/reference/api/search/fields.html
+;     sort: # define sort order - see http://elasticsearch.org/guide/reference/api/search/sort.html
+;     query: {
+;         query_string: { fields: [] query: "query term"}
+;     },
+;     facets: {
+;         # Facets provide summary information about a particular field or fields in the data
+;     }
+;     # special case for situations where you want to apply filter/query to results but *not* to facets
+;     filter: {
+;         # filter objects
+;         # a filter is a simple "filter" (query) on a specific field.
+;         # Simple means e.g. checking against a specific value or range of values
+;     },
+; }
 ;
 ; http://www.slideshare.net/clintongormley/terms-of-endearment-the-elasticsearch-query-dsl-explained
 ; curl -XGET 'http://cte-db3:9200/logstash-2013.05.22/_search?q=@type=finder_core_api
@@ -295,10 +315,8 @@
 (defn process-finderlog-hits [hits]
   "searched out docs is in the hits ary, iterate the list"
   (letfn [(get-value [sdoc]
-            (-> sdoc
-              :_source    ; select source map out
-              ;((juxt (get "@message") (get "@type") (get "@tags")))))] ; project needed fields
-              (get (keyword "@message"))))] ; project needed fields
+            (let [srcmap (:_source sdoc)]
+              (map #(get srcmap (keyword %)) ["@timestamp" "@type" "@tags" "@message"])))]
     (let [values (map get-value hits)]
       ;(doall (map prn hits))
       (doall (map prn values)))))
