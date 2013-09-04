@@ -312,14 +312,18 @@
 
 
 ; hits = :_source {:@source "file://finderapi", :@tags ["finder" "verizon" "core" "FROM_TCP"]
-(defn process-finderlog-hits [hits]
-  "searched out docs is in the hits ary, iterate the list"
-  (letfn [(get-value [sdoc]
-            (let [srcmap (:_source sdoc)]
-              (map #(get srcmap (keyword %)) ["@timestamp" "@type" "@tags" "@message"])))]
-    (let [values (map get-value hits)]
-      ;(doall (map prn hits))
-      (doall (map prn values)))))
+(defn process-finderlog-hits 
+  "searched out hit docs ary, get each doc out"
+  [hitsary]
+  (let [docs (map #(get-in % [:_source]) hitsary)
+        projcols (map keyword ["@timestamp" "@type" "@tags" "@message"])
+        tags (map #(select-keys % [(keyword "@tags")]) docs)
+        rslt (map #(select-keys % projcols) docs)]
+    ;(prn docs)
+    ; (prn "tags " tags)
+    ; (prn rslt)
+    (doall (map println rslt))))
+
 
 (defn query-finderlog [idxname term]
   "query logstash with key name in all columns, eg, 
